@@ -52,3 +52,29 @@ Used by the `aioble` BLE stack (`wand/lib/aioble/`) to store BLE bonding keys. U
 ```json
 [[10, "<base64 device id>", "<base64 bonding key>"]]
 ```
+
+## Advanced: powering the LCD and Grove port on the StickS3
+
+Both the StickS3's built-in LCD and its Grove connector's 5V pin are gated through the **M5PM1** power-management IC (I2C address `0x6E` on I2C bus 1, `scl=Pin(48)`, `sda=Pin(47)`) — not through the ESP32 directly. See [`M5StickS3/m5/m5_power.py`](M5StickS3/m5/m5_power.py).
+
+M5Stack's public M5PM1 driver ([github.com/m5stack/M5PM1](https://github.com/m5stack/M5PM1)) documents the battery-ADC registers (used in [`m5_battery.py`](M5StickS3/m5/m5_battery.py)), but it doesn't spell out the registers that gate the LCD and Grove 5V rails — those were found by reading through M5Stack's open-source UIFlow MicroPython firmware ([github.com/m5stack/uiflow-micropython](https://github.com/m5stack/uiflow-micropython)), which implements StickS3's multi-level power-switch design on top of the same M5PM1, and pulling out the specific GPIO2/BOOST_EN register writes it uses.
+
+**LCD power-on** — the LCD block is fed by an M5PM1 GPIO ("GPIO2" / "L3B") that has to be explicitly configured as a push-pull output and driven high before the ST7789 will respond to anything:
+
+```python
+gpio2_bit = 1 << 2
+set_bit(0x16, gpio2_bit, False)  # gpio2 -> plain GPIO function (not alt function)
+set_bit(0x10, gpio2_bit, True)   # gpio2 -> output mode
+set_bit(0x13, gpio2_bit, False)  # gpio2 -> push-pull drive (not open-drain)
+set_bit(0x11, gpio2_bit, True)   # gpio2 -> output high
+```
+
+**Grove 5V power-on** — the Grove connector's 5V pin is fed by a boost converter that's disabled by default. Setting the `BOOST_EN` bit (bit 3) in the power-config register (`0x06`) enables it:
+
+```python
+pwr_cfg_reg = 0x06
+boost_en_bit = 1 << 3
+set_bit(pwr_cfg_reg, boost_en_bit, True)
+```
+
+`BOOST_EN` auto-clears on every reset and USB re-download, so `power_on_grove_5v()` needs to run again on every boot — any script that talks to a Grove device (`m5_RGB.py`, `m5_EnvSensor.py`, `m5_accel.py`, `m5_potentiometer.py`) calls it on init, so you don't need to call it yourself if you're using those helpers.

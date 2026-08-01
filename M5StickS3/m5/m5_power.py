@@ -1,9 +1,7 @@
 """Shared helper for the M5PM1 power-management IC (I2C addr 0x6E).
 
 StickS3 gates both the LCD block and the Grove connector's 5V pin through
-this chip rather than through the ESP32 itself. See blink.py's original
-comments for how this was reverse-engineered, and potentiometer.py's for
-the Grove 5V (BOOST_EN) discovery.
+this chip rather than through the ESP32 itself.
 """
 
 from machine import Pin, I2C
