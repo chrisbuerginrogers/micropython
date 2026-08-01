@@ -1,0 +1,17 @@
+# --- macOS ---
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+.Spotlight-V100
+.Trashes
+
+# --- Python / MicroPython ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+.mpy_cache/
+
+# --- Secrets ---
+wand/ble_secrets.json
+ws_screen/utilities/secrets.py
