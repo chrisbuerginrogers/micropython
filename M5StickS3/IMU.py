@@ -1,6 +1,7 @@
 from time import sleep_ms
 from m5.m5_display import Display, WHITE, BLACK
 from m5.m5_imu import IMU
+from m5.m5_buttons import Buttons
 
 RED = 0xF800
 GREEN = 0x07E0
@@ -13,6 +14,8 @@ display = Display()
 display.fill(BLACK)
 
 imu = IMU()
+buttons = Buttons()
+paused = False
 
 title = "IMU"
 x = (display.WIDTH - display.text_width(title, scale=2)) // 2
@@ -39,6 +42,14 @@ def draw_value(y, key, label, value, color, fmt):
 
 
 while True:
+    if buttons.a.is_pressed():
+        paused = not paused
+        buttons.a.wait_for_release()
+
+    if paused:
+        sleep_ms(50)
+        continue
+
     ax, ay, az = imu.accel()
     gx, gy, gz = imu.gyro()
     temp_c = imu.temperature()
