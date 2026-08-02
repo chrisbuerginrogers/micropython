@@ -25,6 +25,28 @@ esptool.py --chip esp32s3 write_flash 0 ESP32_GENERIC_S3-SPIRAM_OCT-<date>-v<ver
 
 The Pico project uses the standard Raspberry Pi Pico MicroPython firmware from [micropython.org/download](https://micropython.org/download/).
 
+## M5StickS3 library & examples
+
+`M5StickS3/m5/` is a small hardware library covering the board's LCD, PMIC
+(power/battery/charging), buttons, onboard IMU, Grove port, speaker, and IR.
+See **[M5StickS3/docs/](M5StickS3/docs/)** for a short usage doc per module,
+and **[M5StickS3/m5/CLAUDE.md](M5StickS3/m5/CLAUDE.md)** for the deeper
+hardware-archaeology notes (register maps, what was tried and failed, sources)
+behind it.
+
+Example scripts at the `M5StickS3/` project root, built on that library:
+
+| Script | What it shows |
+|---|---|
+| `hello_world.py`, `blink.py` | Bare-minimum LCD/GPIO starting points |
+| `IMU.py` | All onboard IMU outputs (accel/gyro/temp); BtnA pauses/resumes |
+| `battery_status.py` | Battery mV/%, power source, BtnA toggles charging |
+| `tilt_tone.py` | Tilt (Y-axis) controls a played tone's pitch |
+| `Grove_accelerometer.py`, `potentiometer.py`, `rgb_env.py` | External Grove device examples |
+| `rcx_ir.py` | Talks to a LEGO Mindstorms RCX brick over IR |
+| `power_functions.py` | Drives LEGO Power Functions motors/lights over IR |
+| `universal_remote.py` | Sends/receives NEC and Sony SIRC, sends Philips RC5 |
+
 ## Getting started
 
 1. Install the [MicroPico](https://marketplace.visualstudio.com/items?itemName=paulober.pico-w-go) VS Code extension.
