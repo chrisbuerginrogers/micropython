@@ -18,8 +18,17 @@ display.draw_text(4, 4, "Tilt = pitch", WHITE, BLACK)
 display.draw_text(4, 20, "BtnA = stop", WHITE, BLACK)
 
 imu = IMU()
-speaker = Speaker(volume=60)
 buttons = Buttons()
+
+try:
+    speaker = Speaker(volume=60)
+except OSError as e:
+    # ES8311 codec doesn't respond on I2C on some StickS3 units - see
+    # m5_audio.py's docstring. Keep the tilt readout running silently
+    # rather than crash.
+    print("Speaker init failed ({}) - running without audio".format(e))
+    speaker = None
+    display.draw_text(4, 36, "(no audio)", WHITE, BLACK)
 
 SCALE = 2
 last_text = None
@@ -37,8 +46,10 @@ while not buttons.a.is_pressed():
         display.draw_text(x, 100, text, WHITE, BLACK, scale=SCALE)
         last_text = text
 
-    speaker.tone(freq, TONE_MS)
+    if speaker:
+        speaker.tone(freq, TONE_MS)
 
-speaker.deinit()
+if speaker:
+    speaker.deinit()
 display.fill(BLACK)
 display.draw_text(20, 110, "Stopped", WHITE, BLACK, scale=2)

@@ -18,19 +18,31 @@ official M5Unified/uiflow-micropython firmware for this exact board:
     exact register combination is StickS3's proven-working way to do
     that, rather than something worked out from scratch here.
 
-CAVEAT - tested live and currently not working: on this repo's actual
-StickS3 unit, the ES8311 never answers on I2C at address 0x18 - not at
-startup, not after power_on_speaker(), not with BCLK actively clocked
-(in case its digital core needs that clock present), not at a slower
-I2C speed. i2c.scan() on the internal bus only ever finds 0x68 (IMU)
-and 0x6e (PMIC), never 0x18, even though 0x18 and this exact bring-up
-sequence are both taken straight from M5Stack's own firmware source
-with no other pins or steps found anywhere in it. Whether that means
-this particular board doesn't have the codec populated, or there's a
-hardware fault, isn't something diagnosable from software. Sample rate
-is fixed at 16000Hz stereo to match the board firmware's own default
-I2S config, in case this starts working on hardware that does have the
-codec and the pitch needs adjusting.
+Confirmed live on this repo's StickS3: a 440Hz tone played and was
+audible (heard directly, not just "no exception raised").
+
+CAVEAT - the I2C connection to the codec has been flaky. Across earlier
+testing in this same session, `Speaker()` reliably raised
+`OSError: [Errno 19] ENODEV` from the very first I2C write inside
+_codec_init() - i2c.scan() on the internal bus found only 0x68 (IMU)
+and 0x6e (PMIC), never the codec at 0x18 or its alternate 0x19, across
+several conditions (at startup, after power_on_speaker(), with BCLK
+actively clocked, at a slower I2C speed, with the 3.3V LDO rail forced
+on). Then, after several power cycles/USB reconnects for unrelated
+reasons, it started responding - i2c.scan() found 0x18, and its chip ID
+registers read back exactly 0x83/0x11, the documented ES8311 identity
+every ES8311 driver checks for. That timeline points to a marginal
+physical connection (e.g. a connector or solder joint that needed
+reseating) rather than a wiring/register bug, but if Speaker() starts
+raising ENODEV again, that's the known failure mode, not a regression
+in this code - see tilt_tone.py for an example of catching it rather
+than crashing. Sample rate is fixed at 16000Hz stereo to match the
+board firmware's own default I2S config for this specific bring-up
+sequence; M5Stack's general Speaker_Class docs
+(docs.m5stack.com/en/arduino/m5unified/speaker_class) default to
+44100Hz, but that's for their C++ stack's own MCLK-pin-based codec
+setup, not this BCLK-derived-clock one, so it isn't a drop-in number
+here.
 """
 
 from machine import Pin, I2C, I2S
