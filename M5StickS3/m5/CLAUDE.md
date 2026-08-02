@@ -157,6 +157,34 @@ via `SPACE_IS_CARRIER_ON` at the top of the file if it needs flipping.
 verified that construction and the RMT transmit path run without
 crashing.
 
+`power_functions.py` talks **LEGO Power Functions** — the protocol
+that replaced RCX's IR link from 2007 onward (Technic/train motors and
+lights). Simpler than RCX: pulse-distance encoded nibbles (156us mark,
+260/546/1014us spaces), no UART framing. Ported from a verified
+working Arduino library (`TheJarOS/LegoPowerFunctions-Arduino-Library`).
+Implements `SingleOutput` (single-motor PWM speed, with LEGO's
+auto-toggle-per-command bit) and `ComboPWM` (both outputs of a channel
+at once); `SinglePin`/`ComboMode` aren't implemented. LRC checksum
+invariant and live transmission verified on hardware; **never tested
+against a real PF receiver** (none available).
+
+`universal_remote.py` implements the non-LEGO "big three" consumer IR
+protocols — **NEC**, **Sony SIRC** (12-bit only), and **Philips RC5**
+— ported from Peter Hinch's `micropython_ir` reference library. NEC
+and Sony carry both encode *and* decode, self-verified via round-trip
+against known (address, data) pairs (host-side pure Python and
+on-device). RC5's biphase/Manchester encoder is a line-for-line port
+of the reference's `append()`/`add()` array-mutation approach (some
+bits need merging into the previous pulse segment rather than starting
+a new one) — cross-checked against an independent simulation of that
+same algorithm across several inputs, but **send-only, no decoder**
+(Manchester decode is more failure-prone to get right without real
+hardware to test against, so it was deliberately left out rather than
+guessed at). Sony needs a 40kHz carrier and RC5 needs 36kHz — both
+differ from NEC/PF's 38kHz, so `IRTransmitter(carrier_hz=...)` gets
+overridden per-protocol. All three confirmed to transmit without error
+on hardware; none tested against a real receiving device.
+
 ## Dev workflow gotchas (not hardware, but will burn time)
 
 - VS Code's MicroPico extension (`micropico.openOnStart` in this
