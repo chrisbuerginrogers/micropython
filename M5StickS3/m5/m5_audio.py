@@ -121,3 +121,4 @@ class Speaker:
 
     def deinit(self):
         self._i2s.deinit()
+        m5_power.power_off_speaker()

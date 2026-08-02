@@ -87,6 +87,9 @@ def get_power_source():
     return read_reg(_PWR_SRC_REG)[0] & 0x07
 
 
+_GPIO3_BIT = 1 << 3
+
+
 def power_on_speaker():
     """Enable the GPIO3 rail that gates the AW8737 speaker amplifier.
 
@@ -95,9 +98,18 @@ def power_on_speaker():
     this before using m5_audio - like power_on_lcd(), it isn't known to
     auto-clear, but every M5Stack init path re-asserts it on every boot
     anyway, so this module does the same.
+
+    Leave this off when you're not actively playing audio: the AW8737
+    idling still draws meaningfully more than the PMIC's ~14uA
+    power-off figure on a 250mAh cell, and M5Stack's own docs say the
+    amp must be off for the IR receiver to work reliably (see m5_ir.py).
     """
-    gpio3_bit = 1 << 3
-    set_bit(0x16, gpio3_bit, False)  # gpio3 -> plain GPIO function
-    set_bit(0x10, gpio3_bit, True)  # gpio3 -> output mode
-    set_bit(0x13, gpio3_bit, False)  # gpio3 -> push-pull drive
-    set_bit(0x11, gpio3_bit, True)  # gpio3 -> output high
+    set_bit(0x16, _GPIO3_BIT, False)  # gpio3 -> plain GPIO function
+    set_bit(0x10, _GPIO3_BIT, True)  # gpio3 -> output mode
+    set_bit(0x13, _GPIO3_BIT, False)  # gpio3 -> push-pull drive
+    set_bit(0x11, _GPIO3_BIT, True)  # gpio3 -> output high
+
+
+def power_off_speaker():
+    """Disable the AW8737 amp rail enabled by power_on_speaker()."""
+    set_bit(0x11, _GPIO3_BIT, False)  # gpio3 -> output low

@@ -11,6 +11,13 @@ it's meant as a building block for devices that don't speak NEC, like
 the LEGO RCX (see rcx_ir.py). MicroPython's stock esp32.RMT only
 supports transmit, not capture, so IRReceiver bit-bangs pulse timing
 off the receiver pin instead of using RMT for that half.
+
+IMPORTANT for IRReceiver: M5Stack's own StickS3 docs note the speaker
+amp (AW8737) must be off for IR reception to work reliably - presumably
+switching noise on a shared rail/ground bleeding into the IR receiver's
+sensitive analog front end. If you've called m5_power.power_on_speaker()
+(or used m5_audio.Speaker) in the same script, call
+m5_power.power_off_speaker() before reading from IRReceiver.
 """
 
 from machine import Pin
