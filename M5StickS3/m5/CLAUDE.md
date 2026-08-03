@@ -80,6 +80,56 @@ RGB LED (data on G9), MMA7660FC Grove accelerometer (`0x4C`,
 analog — **can't share the bus with an I2C hub**, the hub's pull-ups
 swamp the pot's analog signal; see `rgb_env.py`'s notes).
 
+## RFID2 Unit — WS1850S (m5_rfid.py)
+
+Grove I2C address `0x28`. The WS1850S is an MFRC522 work-alike: same
+register map, same command set, reached over I2C instead of the
+MFRC522's usual SPI. Ported from M5Stack's own driver
+(`uiflow-micropython`, `m5stack/libs/driver/mfrc522/` + `libs/unit/rfid.py`),
+itself a port of the Arduino MFRC522 library.
+
+`VersionReg` (`0x37`) reads **`0x15`** — not one of the MFRC522's
+documented `0x90`/`0x91`/`0x92` values, so the upstream
+`pcd_perform_self_test()` firmware-checksum comparison can never pass on
+this chip. It isn't ported here; `version()` is only good as an "is the
+unit answering" check.
+
+**Confirmed live**: a 7-byte-UID Ultralight/NTAG tag read as
+`04F686A2CC2190`, SAK `0x00`, through the two-cascade-level select path.
+Cross-checked independently — pages 0-3 of that tag read back
+`04F686 FC A2CC2190`, i.e. UID[0:3], BCC0, UID[3:7], which is exactly
+the UID `select()` assembled. MIFARE Classic block reads are ported but
+**never tested against a Classic tag** (none available); only the
+Ultralight path is hardware-verified.
+
+Three upstream bugs found and fixed in this port:
+
+- `pcd_read_bytes()`'s RxAlign merge is written
+  `(data[0] & ~mask) | (data[0] & mask)`, which is just `data[0]` — a
+  no-op that drops the already-known UID bits. Only matters
+  mid-anticollision, i.e. with two or more tags in the field, which is
+  presumably why it survived. Fixed by merging against the destination
+  buffer the way the Arduino original does, which meant giving
+  `_communicate()` a caller-supplied receive buffer instead of a freshly
+  allocated one.
+- Timeout loops subtract raw `ticks_us()` values rather than using
+  `ticks_diff()`, so they read negative across the counter's ~17.9
+  minute wrap. Benign in practice (the hardware TimerIRq still fires)
+  but wrong; uses `ticks_diff()` here.
+- The UID length is never tracked — `read_card_uid()` hands back all 10
+  bytes regardless, so a 4-byte UID comes out padded with leftovers from
+  the previous read. Tracked as `uid_size` here (3 × cascade level + 1).
+
+Also unfixed-but-avoided: their `UID` class holds `uid`/`sak` as *class*
+attributes, so every instance shares one bytearray; `__len__` returns a
+`self.size` that's never assigned; `__str__` prints instead of
+returning; and `RFIDUnit.wakeup_all()` passes an empty buffer into a
+function that rejects anything not exactly 2 bytes, so it can only ever
+return False. None of these are reachable in this port's API.
+
+Writing blocks, the UID-changeable-card backdoor and the sector-dump
+pretty-printer were deliberately left out — the ask was reading.
+
 ## Onboard IMU — BMI270 (m5_imu.py)
 
 6-axis (accel+gyro, no magnetometer — StickS3 doesn't carry a BMM150).
