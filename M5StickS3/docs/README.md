@@ -23,8 +23,11 @@ manually — just construct the class you need.
 | [m5_RGB.md](m5_RGB.md) | Grove SK6812 RGB LED strip |
 | [m5_potentiometer.md](m5_potentiometer.md) | Grove analog potentiometer |
 | [m5_rfid.md](m5_rfid.md) | Grove RFID2 Unit (WS1850S) 13.56MHz tag reader |
+| [m5_wand.md](m5_wand.md) | LEGO Education bricks over BLE, addressed by connection card |
 
 Higher-level, device-specific code built on top of `m5_ir` lives at the
 `M5StickS3/` project root, not in `m5/`: [`rcx_ir.py`](../rcx_ir.py) (LEGO
 RCX), [`power_functions.py`](../power_functions.py) (LEGO Power Functions),
-and [`universal_remote.py`](../universal_remote.py) (NEC/Sony/RC5).
+and [`universal_remote.py`](../universal_remote.py) (NEC/Sony/RC5). Likewise
+[`Wand_driving.py`](../Wand_driving.py), the tap-a-card-and-drive program built
+on [m5_wand.md](m5_wand.md).

@@ -48,6 +48,31 @@ Example scripts at the `M5StickS3/` project root, built on that library:
 | `rcx_ir.py` | Talks to a LEGO Mindstorms RCX brick over IR |
 | `power_functions.py` | Drives LEGO Power Functions motors/lights over IR |
 | `universal_remote.py` | Sends/receives NEC and Sony SIRC, sends Philips RC5 |
+| `Wand_driving.py` | Tap a LEGO connection card, drive that card's bricks over BLE (below) |
+
+## Driving LEGO Education bricks from the StickS3
+
+[`M5StickS3/Wand_driving.py`](M5StickS3/Wand_driving.py) turns the Stick into a
+LEGO connection-card wand. Tap any card on the RFID2 Unit and it listens for
+the bricks advertising under that card, connects to them, and wires them
+together — a Controller drives a Double Motor one joystick per wheel, a Color
+Sensor drives a motor from its reflected-light reading, and the mixed pairs
+work too. The card's color is only its address, not a choice of behavior. It
+waits for the bricks rather than giving up, naming what is still missing; BtnA
+stops, and another card switches over.
+
+It is a short file — the tap-and-drive loop and nothing else. Everything under
+it lives in [`M5StickS3/m5/m5_wand.py`](M5StickS3/m5/m5_wand.py): the card
+decode, the screen, and a BLE central whose `Controller`, `ColorSensor`,
+`SingleMotor` and `DoubleMotor` classes are usable on their own, connecting by
+card color and serial — which is how the bricks identify themselves in their
+advertisements. See [docs/m5_wand.md](M5StickS3/docs/m5_wand.md).
+
+These bricks also talk to each other *connectionlessly*, by broadcasting under
+the same FD02 UUID with no pairing at all. That is a different protocol —
+reverse-engineered in the sibling `SimpleLE` repo under `card_mode/` — and
+`m5_wand` deliberately does not implement it: it carries seven speed steps per
+stick and neither joystick angle nor reflected light.
 
 ## Getting started
 
