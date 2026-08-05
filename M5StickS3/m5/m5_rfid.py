@@ -112,10 +112,37 @@ _SAK_TYPES = {
 }
 
 
+class ReadError(Exception):
+    """A read that didn't complete and is worth retrying.
+
+    Raised for a CRC mismatch, a short answer, or the tag dropping out
+    part-way through - typically because it moved, or was re-selected a
+    moment earlier. Distinct from a `None` return, which means the tag is
+    still sitting there and permanently can't serve that request (wrong
+    key, or the wrong tag type for the command).
+    """
+
+
+#: How long the Grove 5V boost rail needs before the unit will answer.
+BOOST_SETTLE_MS = 100
+
+# Bound on reset()'s wait for the PowerDown bit to clear.
+_POWERDOWN_POLLS = 20
+_POWERDOWN_POLL_MS = 5
+
+
 class RFID:
     ADDR = 0x28
 
-    def __init__(self, i2c=None, addr=ADDR):
+    def __init__(self, i2c=None, addr=ADDR, attempts=6, retry_ms=500):
+        """Power up and reset the reader.
+
+        power_on_grove_5v() only *starts* the BOOST_EN rail coming up, so
+        the first register write can go out before the unit has power and
+        fail with ETIMEDOUT. It's intermittent, which makes it read as
+        flaky hardware rather than a race - hence the settle delay plus
+        `attempts` tries `retry_ms` apart before giving up.
+        """
         m5_power.power_on_grove_5v()
         self.i2c = i2c or I2C(0, scl=Pin(GROVE_SCL_PIN), sda=Pin(GROVE_SDA_PIN), freq=100000)
         self.addr = addr
@@ -133,7 +160,20 @@ class RFID:
         self._auth_buf = bytearray(12)
         self._sel_buf = bytearray(9)
 
-        self.reset()
+        sleep_ms(BOOST_SETTLE_MS)
+        last = None
+        for attempt in range(attempts):
+            if attempt:
+                sleep_ms(retry_ms)
+            try:
+                self.reset()
+                break
+            except OSError as exc:
+                last = exc
+        else:
+            raise OSError("RFID2 unit at 0x{:02X} did not come up after {} "
+                          "attempts over {}ms - check the Grove cable ({})".format(
+                              addr, attempts, attempts * retry_ms, last))
 
     # ------------------------------------------------------------------
     # Reader (PCD) setup and raw register access
@@ -146,8 +186,19 @@ class RFID:
         """
         self._write(_COMMAND_REG, _PCD_SOFTRESET)
         sleep_ms(50)
-        while self._read(_COMMAND_REG) & (1 << 4):
-            pass  # PowerDown still set - the reset hasn't finished
+        # PowerDown clears once the reset finishes. Bounded, because an
+        # unbounded spin here escapes only when _read() happens to raise
+        # ETIMEDOUT - i.e. via an unrelated exception. A unit that answers
+        # with the bit genuinely stuck would hang the board with no
+        # traceback at all.
+        for _ in range(_POWERDOWN_POLLS):
+            if not (self._read(_COMMAND_REG) & (1 << 4)):
+                break
+            sleep_ms(_POWERDOWN_POLL_MS)
+        else:
+            raise OSError("WS1850S still reports PowerDown {}ms after a soft "
+                          "reset - the reader is not resetting".format(
+                              _POWERDOWN_POLLS * _POWERDOWN_POLL_MS))
 
         # Timer: TAuto, so it starts by itself the moment transmission
         # ends. Prescaler 0xA9 = 169 gives f_timer 40kHz, and a reload of
@@ -518,41 +569,94 @@ class RFID:
         status, _, _ = self._communicate(_PCD_MFAUTHENT, 0x10, buf)  # IdleIRq
         return status
 
-    def read_block(self, block, key=DEFAULT_KEY, use_key_b=False):
-        """Read one 16-byte MIFARE Classic block; None if it fails.
+    def read_block(self, block, key=DEFAULT_KEY, use_key_b=False,
+                   retries=3, retry_ms=60):
+        """Read one 16-byte MIFARE Classic block.
+
+        Returns the block on success. Returns None if the tag is still in
+        the field but won't accept this key - a wrong key, or an
+        Ultralight/NTAG, which has no such authentication (read_pages() is
+        their equivalent). Raises ReadError if the read kept failing part
+        way through, after `retries` attempts `retry_ms` apart.
 
         Authenticates the sector first, so this works standalone after a
         read_uid(). Block 0 is the manufacturer block and every 4th block
         (3, 7, 11, ...) is a sector trailer holding keys, not user data -
         key A always reads back as zeros there.
-
-        Ultralight/NTAG tags do not use this authentication and will
-        always return None here; read_pages() is their equivalent.
         """
-        if self.authenticate(block, key, use_key_b) != STATUS_OK:
-            return None
-        return self._mifare_read(block)
+        status = None
+        authenticated = False
+        for attempt in range(retries):
+            if attempt and not self._reselect(retry_ms):
+                continue
+            if self.authenticate(block, key, use_key_b) != STATUS_OK:
+                continue  # may be the wrong key, may be a knocked-out tag
+            authenticated = True
+            status, data = self._mifare_read(block)
+            if status == STATUS_OK:
+                return data
 
-    def read_pages(self, page):
+        # A tag that's still sitting there after every attempt refused us
+        # on its own terms; one that's gone was a read that didn't finish.
+        if not authenticated and self._still_present():
+            return None
+        raise ReadError("block {} read failed: {}".format(
+            block, STATUS_NAMES.get(status, "authentication refused")))
+
+    def read_pages(self, page, retries=3, retry_ms=60):
         """Read 4 Ultralight/NTAG pages (16 bytes) starting at `page`.
 
         Same 0x30 command as read_block(), minus the authentication that
         those tags don't implement - the read rolls over the end of tag
-        memory back to page 0 rather than stopping. Returns None on a
-        MIFARE Classic tag, which won't answer 0x30 unauthenticated.
+        memory back to page 0 rather than stopping.
+
+        Returns the 16 bytes on success. Returns None if the tag is still
+        in the field but won't answer 0x30 unauthenticated at all, i.e.
+        it's a MIFARE Classic. Raises ReadError if the read kept failing
+        part way through, after `retries` attempts `retry_ms` apart.
         """
-        return self._mifare_read(page)
+        status = None
+        for attempt in range(retries):
+            if attempt and not self._reselect(retry_ms):
+                continue
+            status, data = self._mifare_read(page)
+            if status == STATUS_OK:
+                return data
+
+        if status == STATUS_TIMEOUT and self._still_present():
+            return None  # in the field, just doesn't serve this command
+        raise ReadError("page {} read failed: {}".format(
+            page, STATUS_NAMES.get(status, "unknown")))
+
+    def _reselect(self, delay_ms):
+        """Re-select the tag between read attempts.
+
+        A failed transaction leaves the tag deselected, so a bare retry
+        would fail the same way regardless of what went wrong first.
+        """
+        sleep_ms(delay_ms)
+        if self.request() not in (STATUS_OK, STATUS_COLLISION):
+            return False
+        return self.select() == STATUS_OK
+
+    def _still_present(self):
+        """Whether a tag is in the field, without disturbing .uid/.sak."""
+        return self.request() in (STATUS_OK, STATUS_COLLISION)
 
     def _mifare_read(self, addr):
+        """Returns (status, data-or-None) so callers can tell why it failed."""
         buf = bytearray(18)  # 16 data bytes + 2 CRC bytes
         buf[0] = _PICC_MF_READ
         buf[1] = addr
         mv = memoryview(buf)
-        if self._calculate_crc(mv[0:2], mv[2:4]) != STATUS_OK:
-            return None
+        status = self._calculate_crc(mv[0:2], mv[2:4])
+        if status != STATUS_OK:
+            return (status, None)
         # Sending from and receiving into one buffer is safe: the command
         # is already in the reader's FIFO before the answer comes back.
         status, n, _ = self._transceive(mv[0:4], check_crc=True, back_data=buf)
-        if status != STATUS_OK or n != 18:
-            return None
-        return bytes(buf[:16])
+        if status != STATUS_OK:
+            return (status, None)
+        if n != 18:
+            return (STATUS_ERROR, None)  # truncated answer
+        return (STATUS_OK, bytes(buf[:16]))

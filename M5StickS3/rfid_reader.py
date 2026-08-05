@@ -9,7 +9,7 @@ Ultralight/NTAG pages.
 from time import sleep_ms
 from m5.m5_display import Display, WHITE, BLACK
 from m5.m5_buttons import Buttons
-from m5.m5_rfid import RFID, DEFAULT_KEY
+from m5.m5_rfid import RFID, DEFAULT_KEY, ReadError
 
 GREEN = 0x07E0
 YELLOW = 0xFFE0
@@ -29,24 +29,15 @@ HINT_Y = 114
 BLOCK_Y = 134
 BLOCK_ADDR = 4  # MIFARE Classic sector 1 / Ultralight page 4 - first user data
 
-# The 8x8 font draws in (8 * scale + spacing)-wide cells, so only so many
-# characters fit across 135px. Anything wider runs off the panel and
-# _set_window() throws, so every string below goes through fit()/center().
-def max_chars(scale, spacing):
-    return (display.WIDTH + spacing) // (8 * scale + spacing)
-
-
-def fit(text, scale=1, spacing=2):
-    return text[:max_chars(scale, spacing)]
-
-
 def center(y, text, color, scale=1, spacing=2):
-    """Draw text centered on a line, blanking whatever was there before."""
-    blank = " " * max_chars(scale, spacing)
+    """Draw text centered on a line, blanking whatever was there before.
+
+    draw_text_centered() clips anything too wide for the panel by itself,
+    so this doesn't need its own character budget.
+    """
+    blank = " " * display.max_chars(scale, spacing)
     display.draw_text(0, y, blank, color, BLACK, scale=scale, spacing=spacing)
-    text = fit(text, scale, spacing)
-    x = (display.WIDTH - display.text_width(text, scale, spacing)) // 2
-    display.draw_text(x, y, text, color, BLACK, scale=scale, spacing=spacing)
+    display.draw_text_centered(y, text, color, BLACK, scale=scale, spacing=spacing)
 
 
 def as_hex(data):
@@ -99,17 +90,25 @@ while True:
             # directly. Branch rather than try both - a failed
             # authentication drops the tag out of ACTIVE state, so the
             # second attempt would fail even when it should work.
-            if rfid.sak == 0x00:
-                data = rfid.read_pages(BLOCK_ADDR)
+            try:
+                if rfid.sak == 0x00:
+                    data = rfid.read_pages(BLOCK_ADDR)
+                else:
+                    data = rfid.read_block(BLOCK_ADDR, DEFAULT_KEY)
+            except ReadError as exc:
+                # The read didn't finish - the tag probably moved. Leave
+                # block_read False so the next pass tries again.
+                center(BLOCK_Y, "read failed", YELLOW)
+                print("block {}: {}".format(BLOCK_ADDR, exc))
             else:
-                data = rfid.read_block(BLOCK_ADDR, DEFAULT_KEY)
-            if data is None:
-                center(BLOCK_Y, "blk {} locked".format(BLOCK_ADDR), YELLOW)
-                print("block {}: no read (wrong key?)".format(BLOCK_ADDR))
-            else:
-                center(BLOCK_Y, "b{}:{}".format(BLOCK_ADDR, as_hex(data[:4])), GREEN)
-                print("block {}: {}".format(BLOCK_ADDR, as_hex(data)))
-            block_read = True
+                if data is None:
+                    # The tag is fine, it just won't serve this read.
+                    center(BLOCK_Y, "blk {} locked".format(BLOCK_ADDR), YELLOW)
+                    print("block {}: wrong key or wrong tag type".format(BLOCK_ADDR))
+                else:
+                    center(BLOCK_Y, "b{}:{}".format(BLOCK_ADDR, as_hex(data[:4])), GREEN)
+                    print("block {}: {}".format(BLOCK_ADDR, as_hex(data)))
+                block_read = True
         rfid.halt()
         sleep_ms(150)
         continue

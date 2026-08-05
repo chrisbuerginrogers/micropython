@@ -60,6 +60,28 @@ SPI1: `sck=40, mosi=39`; `dc=45, cs=41, rst=21`; backlight=`Pin(38)`.
 Needs `m5_power.power_on_lcd()` first (PMIC GPIO2) — the LCD has no
 power without it. This panel needs `INVON` for correct colors.
 
+**The font used to be a 31-glyph subset** — only the characters the
+sample scripts here happened to print, which was 8 of 26 capitals and 9
+lowercase. `draw_char()` drew anything else as a *space*, so a missing
+letter was invisible rather than wrong: `"ORANGE"` (none of whose
+letters were present) rendered as blank and looked like a dead panel,
+not a font gap. Several scripts in this folder were quietly affected —
+`tilt_tone.py`'s "Tilt = pitch" and `battery_status.py`'s "BtnA =
+toggle charge" were both rendering with holes. Now the full printable
+ASCII range `0x20`-`0x7E` is present, and anything still unmapped draws
+as a visible hollow box (`MISSING_GLYPH`). The 31 original glyphs were
+left byte-for-byte identical; all 95 are the public-domain
+font8x8_basic, verified by rendering them back out as ASCII art with
+`draw_char()`'s own bit convention (bit 0 = leftmost).
+
+**Text didn't clip.** `_set_window()` adds `OFFSET_X` without clamping
+to `PANEL_W`, so text past the right edge wrote into GRAM outside the
+visible window, and far enough past it the coordinate overflowed a byte
+and raised `ValueError: bytes value out of range`. Every caller had to
+compute its own character budget to avoid it. `draw_text()`/`draw_char()`
+now clip by default (`clip=True`), with `draw_text_centered()` and
+`max_chars()` added so callers stop reimplementing both.
+
 ## Battery (m5_battery.py)
 
 M5PM1 `VBAT_L`/`VBAT_H` (`0x22`/`0x23`), 12-bit ADC in mV, register
@@ -129,6 +151,32 @@ return False. None of these are reachable in this port's API.
 
 Writing blocks, the UID-changeable-card backdoor and the sector-dump
 pretty-printer were deliberately left out — the ask was reading.
+
+Three further fixes after building against this driver:
+
+- **Cold-start race.** `power_on_grove_5v()` only *starts* the BOOST_EN
+  rail coming up, so the first register write in `reset()` could go out
+  before the unit had power and fail with `ETIMEDOUT`. Intermittent, so
+  it read as flaky hardware rather than a race. `__init__` now waits
+  `BOOST_SETTLE_MS` (100ms) then retries 6× at 500ms.
+- **`reset()`'s PowerDown wait was unbounded.** It only ever escaped
+  because `_read()` raises `ETIMEDOUT` when the unit isn't answering —
+  i.e. the exit path was an unrelated exception. A unit answering with
+  the bit genuinely stuck would hang the board with no traceback. Now
+  bounded (20 polls × 5ms) and raises a message that says so.
+- **`None` meant two opposite things** from `read_block()`/`read_pages()`:
+  "this tag type can't do that" (permanent) and "the read didn't
+  complete" (transient). Callers couldn't tell whether retrying was
+  worth it, so an occasional empty read on a good card looked like a bad
+  card. Now: `None` = still in the field and permanently refusing;
+  `ReadError` = didn't complete, retry. Both retry internally first
+  (3× at 60ms), re-selecting between attempts because a failed
+  transaction leaves the tag deselected. The two are told apart by
+  re-checking presence after the last attempt.
+
+Confirmed live for all three: init 157ms, `reset()` returns in 55ms, a
+no-tag `read_pages()` raises `ReadError`, and `read_block()` on an
+Ultralight returns `None` rather than raising.
 
 ## Onboard IMU — BMI270 (m5_imu.py)
 
