@@ -141,6 +141,7 @@ def main():
             if card is None:
                 card = Wand.wait_for_card(ui, rfid)
             color, serial = card
+
             print('\n got {} #{}'.format(Wand.color_name(color), serial))
             card = run_card(ui, buttons, rfid, color, serial)
     except KeyboardInterrupt:
