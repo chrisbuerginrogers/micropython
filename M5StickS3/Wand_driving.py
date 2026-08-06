@@ -1,109 +1,142 @@
-"""Tap a LEGO connection card, and drive whatever answers to it.
-
+"""Tap a LEGO connection card - its color decides what happens
   >>> Runs ON the M5StickS3. Needs m5/ and the Grove RFID2 Unit. <<<
 
-Tap any card on the reader. The Stick listens for the bricks carrying
-that card, connects to them, and wires them together:
+PURPLE   double motor + controller     one joystick per wheel
+GREEN    single motor + color sensor   reflected light drives it
 
-    Controller   + Double Motor    one joystick per wheel
-    Controller   + Single Motor    the left stick drives it
-    Color Sensor + Double Motor    reflected light drives both wheels
-    Color Sensor + Single Motor    reflected light drives it
-
-The card's *color* is only its address -- it does not pick a behavior.
-Purple, green, orange or any other card all work the same way: whatever
-answers to that card is what runs.
-
-The bricks have to be switched on and carrying the card. This waits for
-them rather than giving up, naming what is still missing on screen; BtnA
-stops, and tapping a different card switches straight over.
-
-**A brick that something else is already connected to is not
-advertising**, so it cannot be found. If a brick is blinking away and
-never turns up, disconnect it from the LEGO app first -- each brick has
-exactly one connection slot.
-
-Everything this leans on -- the BLE central, the card decode, the screen
--- lives in `m5/m5_wand.py`; see `docs/m5_wand.md`. This file is just
-the loop that joins them, so it is the one to copy and change when you
-want a different behavior. Set `m5_wand.VERBOSE = True` below the
-imports if a brick connects and then does nothing.
+Tap a card and the stick waits for that color's two bricks to turn up,
+then runs them. BtnA stops; tapping another card switches straight to
+it. Everything the bricks understand is in `m5/m5_wand.py`; see
+`docs/m5_wand.md`.
 """
 
 import time
 
 from m5.m5_buttons import Buttons
 from m5.m5_rfid import RFID
-from m5.m5_wand import (
-    LOOP_MS, REFRESH_MS, Cancelled, UI, Watcher, apply_speeds, close_radio,
-    color_name, connect_brick, find_pair, readout, sender_speeds, shut_down,
-    wait_for_card,
-)
+import m5.m5_wand as Wand
 
+
+# The two big readout lines, remembered so they are only repainted when
+# they change: redrawing two scale-2 lines every time round the loop is
+# enough SPI traffic to make the sticks feel laggy.
+_shown = [None]                     # type: list[tuple | None]
+
+
+def show(ui, line0, line1):
+    """Put the two live-readout lines up, if they have changed."""
+    if (line0, line1) != _shown[0]:
+        ui.big(0, line0)
+        ui.big(1, line1)
+        _shown[0] = (line0, line1)
+
+def stick(percent):
+    """A centred joystick still reads a few percent; call that zero."""
+    if -Wand.STICK_DEADZONE < percent < Wand.STICK_DEADZONE:
+        return 0
+    return percent
+
+def wait_for(ui, watcher, color, serial, *classes):
+    """Connect to each kind of brick in turn, waiting for each to show up.
+    Waits indefinitely, so switching a brick on after the tap is all it
+    takes. BtnA and another card both arrive here as Cancelled.
+    """
+    bricks = []
+    try:
+        for slot, cls in enumerate(classes):
+            bricks.append(
+                Wand.connect_brick(ui, cls, slot, color, serial, watcher))
+    except BaseException:
+        Wand.shut_down(bricks)
+        raise
+    return bricks
+
+def keep_going(ui, watcher, *bricks):
+    """Refresh every brick, and say whether the drive loop runs again.
+    """
+    if watcher.should_stop():
+        return False
+    for brick in bricks:
+        brick.update()
+        if not brick.connected:
+            ui.problem('BRICK LOST', 'check the power')
+            print('a brick disconnected')
+            time.sleep_ms(1500)
+            return False
+    return True
+
+def purple_card(ui, watcher, color, serial):
+    """PURPLE: the controller's two sticks drive the two wheels."""
+    print('waiting for a DOUBLE MOTOR and a CONTROLLER')
+    motor, ctrl = wait_for(ui, watcher, color, serial,
+                           Wand.DoubleMotor, Wand.Controller)
+    print('got the double motor and the controller -- BtnA stops')
+    ui.go()
+    try:
+        while keep_going(ui, watcher, motor, ctrl):
+            left = stick(ctrl.left_percent)
+            right = stick(ctrl.right_percent)
+            motor.tank(left, right)
+            show(ui, 'L {:>4}'.format(left), 'R {:>4}'.format(right))
+            time.sleep_ms(50)
+    finally:
+        Wand.shut_down((motor, ctrl))
+
+def green_card(ui, watcher, color, serial):
+    """GREEN: reflected light drives the motor -- brighter is faster."""
+    print('waiting for a SINGLE MOTOR and a COLOR SENSOR')
+    motor, sensor = wait_for(ui, watcher, color, serial,
+                             Wand.SingleMotor, Wand.ColorSensor)
+    print('got the single motor and the color sensor -- BtnA stops')
+    ui.go()
+    try:
+        while keep_going(ui, watcher, motor, sensor):
+            # Reflection is 0..255 and set_speed() wants -100..100, so
+            # this conversion is not optional.
+            speed = Wand.light_to_speed(sensor.reflection)
+            motor.set_speed(speed)
+            show(ui, 'LIT{:>4}'.format(sensor.reflection),
+                 'SPD{:>4}'.format(speed))
+            time.sleep_ms(50)
+    finally:
+        Wand.shut_down((motor, sensor))
+
+def other_card(ui, watcher, color):
+    """A color with no rule. Say so about the rule, not about the room.
+    """
+    ui.problem('NO RULE FOR', Wand.color_name(color))
+    print('no rule for {} -- try purple or green'
+          .format(Wand.color_name(color)))
+    while not watcher.should_stop():
+        time.sleep_ms(50)
 
 def run_card(ui, buttons, rfid, color, serial):
-    """Find this card's bricks, wire them together, and run until stopped.
-
-    Returns the card that interrupted it, or None if BtnA did.
-    """
-    watcher = Watcher(buttons, rfid, (color, serial))
+    """What to do when tapped  """
+    watcher = Wand.Watcher(buttons, rfid, (color, serial))
     ui.card(color, serial)
     ui.hint('BtnA stops')
-    sender = None
-    actuator = None
+    _shown[0] = None                # ui.card() just repainted over them
+
     try:
-        sender_cls, actuator_cls = find_pair(ui, color, serial, watcher)
-        sender = connect_brick(ui, sender_cls, 0, color, serial, watcher)
-        actuator = connect_brick(ui, actuator_cls, 1, color, serial, watcher)
-        ui.go()
-        print('running -- BtnA or another card stops')
-
-        sent = None
-        sent_at = time.ticks_ms()
-        shown = None
-        while not watcher.should_stop():
-            sender.update()
-            actuator.update()
-            if not (sender.connected and actuator.connected):
-                ui.problem('BRICK LOST', 'check the power')
-                print('a brick disconnected')
-                time.sleep_ms(1500)
-                break
-
-            left, right = sender_speeds(sender)
-            stale = time.ticks_diff(time.ticks_ms(), sent_at) > REFRESH_MS
-            if (left, right) != sent or stale:
-                apply_speeds(actuator, left, right)
-                sent = (left, right)
-                sent_at = time.ticks_ms()
-
-            # Redrawn only on change: repainting two scale-2 lines every
-            # 50 ms is enough SPI traffic to make the sticks feel laggy.
-            lines = readout(sender, actuator, left, right)
-            if lines != shown:
-                ui.big(0, lines[0])
-                ui.big(1, lines[1])
-                shown = lines
-
-            time.sleep_ms(LOOP_MS)
-    except Cancelled:
+        if color == Wand.PURPLE:
+            purple_card(ui, watcher, color, serial)
+        elif color == Wand.GREEN:
+            green_card(ui, watcher, color, serial)
+        else:
+            other_card(ui, watcher, color)
+    except Wand.Cancelled:
         pass
-    finally:
-        shut_down((actuator, sender))
     return watcher.next_card
-
 
 def main():
     """Tap cards and run whichever bricks answer to them."""
-    ui = UI()
+    ui = Wand.UI()
     ui.looking('STARTING', '')
     buttons = Buttons()
     try:
         rfid = RFID()
     except OSError as exc:
-        # The Grove 5V boost has already been given six tries to come up
-        # by the driver, so this is the reader being absent or unplugged,
-        # not a race worth retrying here.
+        # The Grove 5V boost has already been given six tries -the reader being absent or unplugged
         ui.problem('NO READER', 'check the grove')
         print('RFID2 unit did not answer: {}'.format(exc))
         ui.close()
@@ -113,20 +146,16 @@ def main():
     try:
         while True:
             if card is None:
-                card = wait_for_card(ui, rfid)
+                card = Wand.wait_for_card(ui, rfid)
             color, serial = card
             print()
-            print('{} #{}'.format(color_name(color), serial))
-            # run_card hands back the card that interrupted it, so tapping
-            # a second card switches straight over without a trip through
-            # wait_for_card().
+            print('got {} #{}'.format(Wand.color_name(color), serial))
             card = run_card(ui, buttons, rfid, color, serial)
     except KeyboardInterrupt:
         print('stopped')
     finally:
-        close_radio()
+        Wand.close_radio()
         ui.close()
-
 
 if __name__ == '__main__':
     main()

@@ -634,7 +634,9 @@ class _Central(object):
         if self._scanning:
             self._scanning = False
             try:
-                self._ble.gap_scan(None)
+                # gap_scan(None) is how MicroPython spells "stop now";
+                # the stub types duration_ms as int and flags it.
+                self._ble.gap_scan(None)  # type: ignore[arg-type]
             except OSError:
                 pass
 
@@ -730,7 +732,7 @@ class LegoDevice(object):
         self.usb = None                 # 0 unplugged, 1 plugged in
         self.button = 0                 # 1 while held
 
-        self._svc = None
+        self._svc = None                # type: tuple | None
         self._tx = None
         self._rx = None
         self._cccd = None
@@ -756,7 +758,9 @@ class LegoDevice(object):
         Waits indefinitely by default: the brick is expected to be
         switched on and advertising, and "not yet" is not an error.
         """
-        found = self._c.scan_for(self.PRODUCT, color, serial,
+        # -1 is scan_for()'s "any serial"; None means the same thing here.
+        found = self._c.scan_for(self.PRODUCT, color,
+                                 -1 if serial is None else serial,
                                  timeout_ms=timeout_ms, on_wait=on_wait)
         if found is None:
             return False
@@ -1551,6 +1555,12 @@ def find_pair(ui, color, serial, watcher):
     mask = central().discover(color, serial, ready=ready, on_wait=waiting)
     sender = pick(mask, SENDERS)
     actuator = pick(mask, ACTUATORS)
+    if sender is None or actuator is None:
+        # Unreachable: discover() was given no timeout, so it only
+        # returns once ready() has seen both halves. Checked anyway so
+        # the attribute reads below cannot be the thing that explains a
+        # crash that started somewhere else.
+        raise LegoError('discover() returned without a full pair')
     print('  found {} + {}'.format(PRODUCT_NAMES[sender.PRODUCT],
                                    PRODUCT_NAMES[actuator.PRODUCT]))
     return sender, actuator
