@@ -16,7 +16,6 @@ from m5.m5_buttons import Buttons
 from m5.m5_rfid import RFID
 import m5.m5_wand as Wand
 
-
 # The two big readout lines, remembered so they are only repainted when
 # they change: redrawing two scale-2 lines every time round the loop is
 # enough SPI traffic to make the sticks feel laggy.
