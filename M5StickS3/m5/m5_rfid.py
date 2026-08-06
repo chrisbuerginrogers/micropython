@@ -91,6 +91,17 @@ STATUS_NAMES = {
     STATUS_MIFARE_NACK: "card sent NAK",
 }
 
+
+def _status_name(status, unknown):
+    """Name for a status code, including the None meaning "never got one".
+
+    A retry loop that never reached the read has no status to report, and
+    that is exactly when it needs to say something.
+    """
+    if status is None:
+        return unknown
+    return STATUS_NAMES.get(status, unknown)
+
 # Receiver gain settings for set_antenna_gain(), RFCfgReg RxGain[6:4]
 # (datasheet table 98). Higher = longer read range, more noise.
 GAIN_18DB = 0x00 << 4
@@ -347,7 +358,9 @@ class RFID:
         if error & 0x08:  # CollErr - more than one card answered
             return (STATUS_COLLISION, n_back, valid_bits)
 
-        if n_back and check_crc:
+        # n_back is only ever non-zero when back_data was given, so the
+        # first test is for the reader's benefit rather than the card's.
+        if back_data is not None and n_back and check_crc:
             if n_back == 1 and valid_bits == 4:
                 return (STATUS_MIFARE_NACK, n_back, valid_bits)
             if n_back < 2 or valid_bits != 0:
@@ -601,7 +614,7 @@ class RFID:
         if not authenticated and self._still_present():
             return None
         raise ReadError("block {} read failed: {}".format(
-            block, STATUS_NAMES.get(status, "authentication refused")))
+            block, _status_name(status, "authentication refused")))
 
     def read_pages(self, page, retries=3, retry_ms=60):
         """Read 4 Ultralight/NTAG pages (16 bytes) starting at `page`.
@@ -626,7 +639,7 @@ class RFID:
         if status == STATUS_TIMEOUT and self._still_present():
             return None  # in the field, just doesn't serve this command
         raise ReadError("page {} read failed: {}".format(
-            page, STATUS_NAMES.get(status, "unknown")))
+            page, _status_name(status, "unknown")))
 
     def _reselect(self, delay_ms):
         """Re-select the tag between read attempts.

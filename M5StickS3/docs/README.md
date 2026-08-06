@@ -30,4 +30,5 @@ Higher-level, device-specific code built on top of `m5_ir` lives at the
 RCX), [`power_functions.py`](../power_functions.py) (LEGO Power Functions),
 and [`universal_remote.py`](../universal_remote.py) (NEC/Sony/RC5). Likewise
 [`Wand_driving.py`](../Wand_driving.py), the tap-a-card-and-drive program built
-on [m5_wand.md](m5_wand.md).
+on [m5_wand.md](m5_wand.md) — see [Wand_driving.md](Wand_driving.md) for its
+flow chart.
