@@ -8,9 +8,36 @@ pieces a driving loop is built from.
 **Run `Wand_driving.py`**, at the project root. This module does nothing on its
 own.
 
-The card's **color is only its address** — it does not pick a behavior. Tap any
-card and the Stick listens for whatever is advertising under it, then wires the
-first sender to the first motor it hears:
+A card carries a **color and a serial**, and together those are the address
+every brick tapped with that card advertises under. What you then *do* with
+those bricks is the program's choice, and this module supports two ways of
+deciding — see [Wand_driving.md](Wand_driving.md) for the flow chart of the
+one that ships.
+
+### Let the color decide — what `Wand_driving.py` does
+
+Look at the card's color and wait for the two bricks that color calls for:
+
+| Card | Bricks it waits for | What it does |
+|---|---|---|
+| PURPLE | Double Motor + Controller | one joystick per wheel |
+| GREEN | Single Motor + Color Sensor | reflected light drives it |
+| anything else | — | `NO RULE FOR <color>`, wait for another card |
+
+Short and obvious, at the cost of a lookup table you have to keep in step with
+the bricks in the room. The pieces: `wait_for_card()`, `connect_brick()`,
+`Watcher`, `shut_down()`, `UI`, `STICK_DEADZONE`, the four device classes, and
+the `PURPLE`/`GREEN` color codes.
+
+> Mind what an unknown color says. An early version printed *"no bricks are
+> wired to ORANGE"* — a statement about the lookup table that read as a claim
+> about the room, while the orange bricks sat there blinking. `other_card()`
+> says `NO RULE FOR ORANGE` instead, which is about the rule.
+
+### Ask the air — `find_pair()`
+
+Ignore the color, listen for whatever is advertising under the card, and wire
+the first sender to the first motor it hears:
 
 | Sender | Motor | What it does |
 |---|---|---|
@@ -20,23 +47,20 @@ first sender to the first motor it hears:
 | Color Sensor | Single Motor | reflected light drives it |
 
 If a card carries more than one of a kind, `SENDERS` and `ACTUATORS` set the
-preference order — Controller over Color Sensor, Double over Single.
+preference order — Controller over Color Sensor, Double over Single. It waits
+indefinitely, naming what is still missing (`NO SENDER` / `NO MOTOR`) so
+switching a brick on after the tap is all it takes. Any card of any color works
+the moment its bricks are on, and nothing can be wrong about the room.
 
-It waits indefinitely, naming what is still missing (`NO SENDER` / `NO MOTOR`)
-so switching a brick on after the tap is all it takes. BtnA stops; tapping a
-different card switches straight over.
+The pieces for this style are still here and unused by the shipped program:
+`find_pair()`, `sender_speeds()`, `apply_speeds()`, `readout()` and
+`light_to_speed()`.
 
-> Earlier versions keyed behavior off the card color, with purple driving and
-> green following the light. Tapping any other color printed *"no bricks are
-> wired to ORANGE"* — a statement about the lookup table that read as a claim
-> about the room, while the orange bricks sat there blinking. Asking the air
-> cannot be wrong in that way.
-
-`Wand_driving.py` is the loop that does all of the above, and it is short on
-purpose — `run_card()` and `main()` are the whole program, so it is the file to
-copy and change when you want different behavior. The parts it leans on are
-here: `wait_for_card()`, `find_pair()`, `connect_brick()`, `Watcher`,
-`sender_speeds()`, `apply_speeds()`, `readout()`, `shut_down()` and `UI`.
+Either way BtnA stops, and tapping a different card switches straight over.
+`Wand_driving.py` is short on purpose — it is the file to copy and change when
+you want different behavior. [`Wand_driving_minimal.py`](../Wand_driving_minimal.py)
+is the same idea with the error handling, the button and the card swapping
+taken out, if you want somewhere smaller to start.
 
 ## The BLE half, on its own
 
@@ -73,8 +97,8 @@ share:
 
 `central().discover(color, serial, ready=..., on_wait=...)` is the other half:
 instead of stopping at the first match it returns a bit mask of *which product
-types* are advertising under a card, which is how a tap works out what it has
-to work with. `product_bit(product)` reads the mask.
+types* are advertising under a card, which is how the ask-the-air style works
+out what it has to work with. `product_bit(product)` reads the mask.
 
 `SingleMotor.set_speed()` is the whole interface for a "keep turning" loop:
 setting a speed on a stopped motor does nothing visible, so the first call also
@@ -126,7 +150,8 @@ it, but don't copy raw bytes from one to the other.
 - **A brick the LEGO app is connected to will not be found.** Connected devices
   stop advertising, and discovery only sees what is on the air — so a brick you
   can see blinking in the app never turns up here. Disconnect it there first.
-  This is the most likely reason a card sits on `NO SENDER` / `NO MOTOR`.
+  This is the most likely reason a card sits forever on `CONTROLLER ?` (or on
+  `NO SENDER` / `NO MOTOR`, if you are using `find_pair()`).
 - **One connection slot per brick.** The reverse also holds: while this runs the
   Stick holds the slot, so the LEGO app cannot see the brick. And if a real
   controller is driving that motor over the broadcast protocol, both are
