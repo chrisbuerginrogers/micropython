@@ -91,12 +91,10 @@ def green_card(ui, watcher, color, serial):
     ui.go()
     try:
         while keep_going(ui, watcher, motor, sensor):
-            # Reflection is 0..255 and set_speed() wants -100..100, so
-            # this conversion is not optional.
-            speed = Wand.light_to_speed(sensor.reflection)
+            speed = int(2 * sensor.reflection - 100)
+            speed = max(-100, min(100, speed))
             motor.set_speed(speed)
-            show(ui, 'LIT{:>4}'.format(sensor.reflection),
-                 'SPD{:>4}'.format(speed))
+            show(ui, 'LIT{:>4}'.format(sensor.reflection), 'SPD{:>4}'.format(speed))
             time.sleep_ms(50)
     finally:
         Wand.shut_down((motor, sensor))
