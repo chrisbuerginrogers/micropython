@@ -1,9 +1,9 @@
 '''
-sensor_web.py — live colour-sensor readout in the browser.
+sensor_web.py — live color-sensor readout in the browser.
 
-Continuously scans BLE advertisements from LEGO Education colour sensors (fd02
+Continuously scans BLE advertisements from LEGO Education color sensors (fd02
 service data, device type 0x02) and serves a little webpage. Press the button
-on the page to snapshot what each sensor is currently sensing.
+on the page to start watching live; press it again to lock the reading.
 
 No Web Bluetooth needed — bleak does the scanning here, the browser just
 displays it, so it works in any browser on macOS.
@@ -40,6 +40,10 @@ COLOR_CSS = {'black': '#111', 'magenta': '#e0218a', 'purple': '#6b3fa0',
 STALE_S = 8.0
 
 _sensors = {}          # address -> dict(color, css, card_color, serial, rssi, ts)
+_numbers = {}          # address -> big display number, handed out 0, 1, 2, ...
+# This workspace points Pylance at MicroPython stubs, whose Lock has no
+# __enter__/__exit__ — hence the `type: ignore` on each `with _lock:` below.
+# On CPython (where this script runs) the context manager is fine.
 _lock = threading.Lock()
 _purple_only = False
 
@@ -54,7 +58,9 @@ def _on_adv(device, adv):
     if _purple_only and p[1] != 2:
         return
     name = COLOR_NAME.get(p[5], 'raw 0x%02x' % p[5])
-    with _lock:
+    with _lock:  # type: ignore[attr-defined]
+        if device.address not in _numbers:
+            _numbers[device.address] = len(_numbers)   # keeps its number for the session
         _sensors[device.address] = {
             'color': name,
             'css': COLOR_CSS.get(name, '#888'),
@@ -68,19 +74,19 @@ def _on_adv(device, adv):
 def _snapshot():
     now = time.time()
     out = []
-    with _lock:
+    with _lock:  # type: ignore[attr-defined]
         for addr, s in list(_sensors.items()):
             if now - s['ts'] > STALE_S:
                 continue
-            out.append({'uid': addr, 'id': addr[:8], **s,
+            out.append({'uid': addr, 'id': addr[:8], 'num': _numbers.get(addr, 0), **s,
                         'age': round(now - s['ts'], 1)})
-    out.sort(key=lambda d: d['uid'])
+    out.sort(key=lambda d: d['num'])
     return out
 
 
 PAGE = '''<!doctype html><html><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Colour sensors</title><style>
+<title>Color sensors</title><style>
  body{font-family:-apple-system,system-ui,sans-serif;margin:0;padding:24px;
    background:#0f1115;color:#e8eaed;-webkit-user-select:none;user-select:none}
  h1{font-weight:500;font-size:20px;margin:0 0 4px}
@@ -96,29 +102,35 @@ PAGE = '''<!doctype html><html><head><meta charset="utf-8">
    padding:12px;text-align:center}
  .sw{height:120px;border-radius:11px;border:1px solid #3a3f4a;margin-bottom:10px;
    display:flex;align-items:center;justify-content:center;padding:6px}
- .uid{font-family:ui-monospace,Menlo,monospace;font-size:11px;line-height:1.35;
-   color:#fff;background:rgba(0,0,0,.5);padding:5px 7px;border-radius:7px;
-   word-break:break-all;max-width:100%}
+ .num{font-size:76px;font-weight:700;line-height:1;color:#fff;
+   text-shadow:0 2px 10px rgba(0,0,0,.65)}
  .name{font-size:18px;font-weight:500;text-transform:capitalize}
  .meta{color:#9aa0a6;font-size:12px;margin-top:4px}
  .empty{color:#9aa0a6;margin-top:22px}
 </style></head><body>
-<h1>Colour sensor readout</h1>
-<div class="sub">Hold the button to watch live. Let go to lock the reading.</div>
-<button id="btn">Hold to scan</button><span id="state">locked</span>
+<h1>Color sensor readout</h1>
+<div class="sub">Press the button to watch live. Press it again to lock the reading.</div>
+<button id="btn">Press to scan</button><span id="state">locked</span>
 <div id="grid"></div>
 <script>
 let live=false, latest=[];
 const grid=document.getElementById('grid'), btn=document.getElementById('btn'),
       stateEl=document.getElementById('state');
 
+// dark digits on a light swatch, white digits on a dark one
+function inkFor(hex){
+  const h=hex.replace('#',''),
+        f=h.length===3?h.split('').map(c=>c+c).join(''):h,
+        r=parseInt(f.slice(0,2),16), g=parseInt(f.slice(2,4),16), b=parseInt(f.slice(4,6),16);
+  return (0.299*r+0.587*g+0.114*b)>150 ? '#111' : '#fff';
+}
 function render(d){
-  if(!d.length){ grid.innerHTML='<div class="empty">No colour sensors detected yet — power one on and tap its card.</div>'; return; }
+  if(!d.length){ grid.innerHTML='<div class="empty">No color sensors detected yet — power one on and tap its card.</div>'; return; }
   grid.innerHTML='';
   for(const s of d){
     const el=document.createElement('div'); el.className='card';
     el.innerHTML='<div class="sw" style="background:'+s.css+'">'
-      +'<div class="uid">'+s.uid+'</div></div>'
+      +'<div class="num" style="color:'+inkFor(s.css)+'">'+s.num+'</div></div>'
       +'<div class="name">'+s.color+'</div>'
       +'<div class="meta">card '+s.card_color+' #'+s.serial
       +' · '+s.rssi+' dBm · '+s.age+'s</div>';
@@ -135,14 +147,15 @@ setInterval(poll,200); poll();
 function setLive(on){
   live=on;
   btn.classList.toggle('live',on);
-  btn.textContent=on?'Scanning…':'Hold to scan';
+  btn.textContent=on?'Scanning… (press to lock)':'Press to scan';
   stateEl.textContent=on?'live':'locked';
 }
-btn.addEventListener('pointerdown',e=>{ e.preventDefault(); setLive(true); render(latest); });
-async function lock(){ if(!live) return; setLive(false);
-  try{ render(await fetchColors()); }catch(e){} }   // freeze on the reading at release
-window.addEventListener('pointerup',lock);
-window.addEventListener('pointercancel',lock);
+async function lock(){ setLive(false);
+  try{ render(await fetchColors()); }catch(e){} }   // freeze on the reading at the press
+btn.addEventListener('click',e=>{
+  e.preventDefault();
+  if(live){ lock(); } else { setLive(true); render(latest); }
+});
 </script></body></html>'''
 
 
@@ -163,7 +176,7 @@ class Handler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(body)
 
-    def log_message(self, *a):
+    def log_message(self, format, *args):
         pass
 
 

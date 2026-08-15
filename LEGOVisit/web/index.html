@@ -1,0 +1,180 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LEGOVisit — Browser Control</title>
+
+<!-- mini-coi: cross-origin isolation via a service worker, so Pyodide's
+     stack-switching (what legoeducation needs to make Bluetooth calls look
+     synchronous) works even from a plain static file server. -->
+<script src="./mini-coi-fd.js" scope="./"></script>
+
+<link rel="stylesheet" href="./header.css">
+
+<link rel="stylesheet" href="https://pyscript.net/releases/2026.3.1/core.css">
+<script type="module" src="https://pyscript.net/releases/2026.3.1/core.js"></script>
+
+<style>
+ :root { color-scheme: light; }
+ body{font-family:-apple-system,system-ui,sans-serif;margin:0;padding:24px;
+   background:#ffffff;color:#1a1d24;max-width:980px;margin-inline:auto}
+ h1{font-weight:500;font-size:20px;margin:0 0 4px}
+ .sub{color:#5f6368;font-size:13px;margin-bottom:20px}
+ #isolation-hint{display:inline-block;margin-bottom:18px;font-size:12px;
+   color:#5f6368;background:#f7f8fa;border:1px solid #e1e4e8;
+   border-radius:7px;padding:5px 10px}
+ .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));
+   gap:16px;margin-bottom:22px}
+ .card{background:#ffffff;border:1px solid #e1e4e8;border-radius:14px;
+   padding:16px;box-shadow:0 1px 3px rgba(0,0,0,.05)}
+ .status{font-size:12px;margin-bottom:12px;display:inline-block;
+   padding:2px 8px;border-radius:6px}
+ .status-off{background:#eceff1;color:#5f6368}
+ .status-on{background:#e3f6ea;color:#1e8e3e}
+ .row{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px}
+ button{font-size:13px;font-weight:500;padding:8px 14px;border:0;
+   border-radius:9px;background:#3b6fd6;color:#fff;cursor:pointer;
+   display:inline-flex;align-items:center;gap:6px}
+ button:disabled{background:#eceff1;color:#9aa0a6;cursor:not-allowed}
+ button.btn-outline{background:transparent;border:1px solid #c9ccd1;color:#1a1d24}
+ button.btn-active{background:#279c58}
+ .btn-icon{width:16px;height:16px;flex:none}
+ .readout{display:flex;gap:18px;font-family:ui-monospace,Menlo,monospace;
+   font-size:15px;margin-top:6px}
+ .readout div{color:#5f6368;font-size:11px;font-family:-apple-system,sans-serif}
+ .readout span{color:#1a1d24;font-size:18px;display:block}
+ .swatch-row{display:flex;align-items:center;gap:10px;margin-top:8px}
+ #colorsensor-swatch{width:34px;height:34px;border-radius:8px;
+   border:1px solid #c9ccd1;background:#eee}
+ #colorsensor-name{font-size:14px}
+ #log{background:#f7f8fa;border:1px solid #e1e4e8;border-radius:12px;
+   padding:10px 12px;height:160px;overflow-y:auto;font-family:ui-monospace,Menlo,monospace;
+   font-size:12px;line-height:1.6}
+ .log-ok{color:#1e8e3e}
+ .log-warn{color:#9a6b00}
+ .log-err{color:#c0392b}
+ .log-info{color:#5f6368}
+</style>
+</head>
+<body>
+
+<header id="site-header" class="site-header">
+  <h1>LEGO DEMO 2026</h1>
+  <nav>
+    <a href="./index.html" class="current">Full Control Panel</a>
+    <a href="./GoingTheDistance.html">Going The Distance</a>
+    <a href="./findTheLetter.html">Find The Letter</a>
+  </nav>
+</header>
+
+<div id="browser-warning" class="browser-warning hidden"></div>
+<script>
+(function () {
+  // Plain JS, not type="py": runs immediately on page load rather than
+  // waiting ~10-15s for Pyodide to boot, so an unsupported browser finds
+  // out right away instead of after the whole page has loaded for nothing.
+  var warn = document.getElementById('browser-warning');
+  if (!('bluetooth' in navigator)) {
+    var ua = navigator.userAgent;
+    var looksChrome = /Chrome/.test(ua) && !/Edg\//.test(ua) && !/OPR\//.test(ua);
+    warn.textContent = looksChrome
+      ? "⚠ Web Bluetooth isn't available in this browser, even though it looks like Chrome. These pages need desktop Chrome (Edge and Opera also work) with Web Bluetooth enabled."
+      : "⚠ This browser doesn't support Web Bluetooth. Open this page in Chrome (Edge and Opera also work) — Safari and Firefox can't run it.";
+    warn.classList.remove('hidden');
+  }
+})();
+</script>
+
+<h1>LEGOVisit — Browser Control</h1>
+<div class="sub">Talks straight to LEGO Education hardware over Chrome's Web Bluetooth — no server, no cable.</div>
+<div id="isolation-hint">Serve this over http://localhost (not file://) — Web Bluetooth requires it.</div>
+
+<div class="grid">
+
+  <div class="card">
+    <div id="controller-status" class="status status-off">not connected</div>
+    <div class="row">
+      <button id="btn-connect-controller">
+        <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+          <rect x="2" y="8" width="20" height="10" rx="4"/>
+          <circle cx="8" cy="13" r="2"/><circle cx="16" cy="13" r="2"/>
+        </svg>
+        Controller
+      </button>
+      <button id="btn-disconnect-controller" class="btn-outline" disabled>Disconnect</button>
+    </div>
+    <div class="readout">
+      <div>LEFT<span id="controller-left">--</span></div>
+      <div>RIGHT<span id="controller-right">--</span></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div id="doublemotor-status" class="status status-off">not connected</div>
+    <div class="row">
+      <button id="btn-connect-doublemotor">
+        <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+          <circle cx="5" cy="17" r="3"/><circle cx="19" cy="17" r="3"/>
+          <line x1="8" y1="17" x2="16" y2="17"/>
+          <rect x="7" y="6" width="10" height="7" rx="1.5"/>
+          <line x1="12" y1="13" x2="12" y2="17"/>
+        </svg>
+        Double Motor
+      </button>
+      <button id="btn-disconnect-doublemotor" class="btn-outline" disabled>Disconnect</button>
+    </div>
+    <div class="row">
+      <button id="btn-relay-toggle" class="btn-outline" disabled>Drive from controller</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <div id="singlemotor-status" class="status status-off">not connected</div>
+    <div class="row">
+      <button id="btn-connect-singlemotor">
+        <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+          <circle cx="12" cy="17" r="3"/>
+          <rect x="7" y="6" width="10" height="7" rx="1.5"/>
+          <line x1="12" y1="13" x2="12" y2="17"/>
+        </svg>
+        Single Motor
+      </button>
+      <button id="btn-disconnect-singlemotor" class="btn-outline" disabled>Disconnect</button>
+    </div>
+    <div class="row">
+      <button id="btn-sm-forward" class="btn-outline">Forward</button>
+      <button id="btn-sm-reverse" class="btn-outline">Reverse</button>
+      <button id="btn-sm-stop" class="btn-outline">Stop</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <div id="colorsensor-status" class="status status-off">not connected</div>
+    <div class="row">
+      <button id="btn-connect-colorsensor">
+        <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+          <circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3.5"/>
+          <line x1="12" y1="1" x2="12" y2="3.5"/>
+          <line x1="12" y1="20.5" x2="12" y2="23"/>
+          <line x1="1" y1="12" x2="3.5" y2="12"/>
+          <line x1="20.5" y1="12" x2="23" y2="12"/>
+        </svg>
+        Color Sensor
+      </button>
+      <button id="btn-disconnect-colorsensor" class="btn-outline" disabled>Disconnect</button>
+    </div>
+    <div class="swatch-row">
+      <div id="colorsensor-swatch"></div>
+      <div id="colorsensor-name">--</div>
+    </div>
+  </div>
+
+</div>
+
+<div id="log"></div>
+
+<script type="py" src="./main.py" config="./pyscript.json"></script>
+
+</body>
+</html>

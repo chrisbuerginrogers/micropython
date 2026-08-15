@@ -1,0 +1,26 @@
+/* Shared header for every page in this folder -- same blue-while-loading,
+   green-once-ready colors as the original LEGO Education Pyodide demo's own
+   status bar (edanahy.github.io/pythonbetademos/betasite/, styles/status-bar.css:
+   #5252fd loading, #00a843 ready). Here it doubles as the page's title bar
+   and cross-page nav, so unlike that demo it stays full height rather than
+   collapsing to a thin strip once ready.
+
+   Each page includes this stylesheet and repeats the small header markup
+   itself (see index.html for the block to copy) -- these are standalone
+   pages with no shared templating, so the markup lives in each file and
+   only the CSS is shared. */
+
+.site-header{background:#5252fd;color:#fff;padding:12px 20px;
+  display:flex;align-items:center;gap:18px;flex-wrap:wrap;
+  transition:background .6s ease;margin:-24px -24px 24px -24px}
+.site-header.ready{background:#00a843}
+.site-header h1{font-size:14px;font-weight:700;margin:0;
+  letter-spacing:.04em;white-space:nowrap}
+.site-header nav{display:flex;gap:16px;flex-wrap:wrap}
+.site-header nav a{color:#fff;text-decoration:none;font-size:13px;opacity:.8}
+.site-header nav a:hover{opacity:1;text-decoration:underline}
+.site-header nav a.current{opacity:1;font-weight:600;text-decoration:underline}
+
+.browser-warning{background:#fdecea;color:#8a2c22;border:1px solid #f3b7ae;
+  border-radius:10px;padding:10px 14px;font-size:13px;margin-bottom:18px}
+.browser-warning.hidden{display:none}

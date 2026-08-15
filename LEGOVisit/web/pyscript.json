@@ -1,0 +1,16 @@
+{
+	"terminal": false,
+	"packages": [],
+	"files": {
+		"./legoeducation/__init__.py": "./legoeducation/__init__.py",
+		"./legoeducation/_platform.py": "./legoeducation/_platform.py",
+		"./legoeducation/background_worker.py": "./legoeducation/background_worker.py",
+		"./legoeducation/basic_ble.py": "./legoeducation/basic_ble.py",
+		"./legoeducation/basic_device.py": "./legoeducation/basic_device.py",
+		"./legoeducation/ble_transport.py": "./legoeducation/ble_transport.py",
+		"./legoeducation/color_map.py": "./legoeducation/color_map.py",
+		"./legoeducation/device.py": "./legoeducation/device.py",
+		"./legoeducation/rpc_message.py": "./legoeducation/rpc_message.py",
+		"./legoeducation/web_bluetooth.py": "./legoeducation/web_bluetooth.py"
+	}
+}
